@@ -1,4 +1,30 @@
-//! TODO
+//! Dynamic resharing of FROST signing keys.
+//!
+//! Implements [Wang's Verifiable Secret Resharing (VSR) Scheme
+#![doc = "](https://www.semanticscholar.org/paper/Verifiable-Secret-Redistribution\
+-for-Threshold-Wong-Wang/48d248779002b0015bdb99841a43395b526d5f8e)."]
+//! FROST signing shares can be periodically rotated among signers to
+//! protect against mobile and active adversaries. This allows old shares
+//! to be 'revoked' (although only in a soft manner) and replaced with new shares.
+//!
+//! As a byproduct, resharing allows signers to change parameters of their
+//! signing group, including setting a new threshold, changing identifiers,
+//! adding new signers or excluding old signers from the new group of shares.
+//! Resharing can be done even if some signers are offline; as long as the
+//! signing threshold is met, the joint secret can be redistributed with new
+//! shares and potentially a new threshold.
+//!
+//! Shares issued from before and after the resharing are mutually incompatible,
+//! so it is imperative that at least the one threshold-subset of signers ACK
+//! the resharing as successful before anyone deletes their old shares. See
+//! [`reshare_step_2`] for more info.
+//!
+//! After a resharing occurs, the old shares are still usable. Normally, signers
+//! are advised to delete their old shares, but nothing prevents them from keeping
+//! the outdated shares either by maliciousness or through honest mistake.
+//!
+//! Downstream consumers should consider how inactive signers will be notified
+//! about a resharing which occurrs while they are offline.
 
 use std::collections::BTreeMap;
 
