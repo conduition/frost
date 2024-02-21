@@ -76,6 +76,34 @@ pub fn reshare_step_1<C: Ciphersuite, R: RngCore + CryptoRng>(
     Ok(subshares)
 }
 
+/// TODO docs
+pub fn verify_commitment<C: Ciphersuite>(
+    sender_ident: &Identifier<C>,
+    old_pubkeys: &PublicKeyPackage<C>,
+    commitment: &VerifiableSecretSharingCommitment<C>,
+    new_threshold: u16,
+) -> Result<(), Error<C>> {
+    // Ensure each subshare is from a member of the group.
+    let verifying_share = old_pubkeys
+        .verifying_shares
+        .get(sender_ident)
+        .ok_or(Error::UnknownIdentifier)?;
+
+    // Constant term of the commitment MUST be the same as the sender's own
+    // public share. If this fails, the sender used the wrong share to generate
+    // their commitment.
+    if commitment.coefficients()[0].value() != verifying_share.to_element() {
+        return Err(Error::IncorrectCommitment)?; // TODO add culprit
+    }
+
+    // Every peer's resharing polynomial must have degree `t' - 1`.
+    if commitment.coefficients().len() != new_threshold as usize {
+        return Err(Error::InvalidCoefficients); // TODO add culprit
+    }
+
+    Ok(())
+}
+
 /// Verify and combine a set of secret subshares into a new FROST signing share.
 ///
 /// `our_ident` is the identifier for ourself.
@@ -112,22 +140,12 @@ pub fn reshare_step_2<C: Ciphersuite>(
 ) -> Result<(KeyPackage<C>, PublicKeyPackage<C>), Error<C>> {
     validate_num_of_signers(new_threshold, new_idents.len() as u16)?;
     for (sender_ident, subshare) in received_subshares.into_iter() {
-        // Ensure each subshare is from a member of the group.
-        let verifying_share = old_pubkeys
-            .verifying_shares
-            .get(sender_ident)
-            .ok_or(Error::UnknownIdentifier)?;
-
-        // Constant term of the commitment MUST be the same as the sender's own
-        // public share. If this fails, the `old_pubkeys` is internally inconsistent.
-        if subshare.commitment.coefficients()[0].value() != verifying_share.to_element() {
-            return Err(Error::IncorrectCommitment)?; // TODO add culprit
-        }
-
-        // Every peer's resharing polynomial must have degree `t' - 1`.
-        if subshare.commitment.coefficients().len() != new_threshold as usize {
-            return Err(Error::InvalidCoefficients); // TODO add culprit
-        }
+        verify_commitment(
+            &sender_ident,
+            old_pubkeys,
+            &subshare.commitment,
+            new_threshold,
+        )?;
     }
 
     let old_idents: BTreeSet<Identifier<C>> = received_subshares.keys().copied().collect();
