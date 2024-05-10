@@ -19,6 +19,7 @@ fn check_tweaked_signing_key() {
         &message,
         SigningParameters {
             tapscript_merkle_root: Some(vec![]),
+            bip32_key_path: Some(vec![0, 0]),
         },
     );
 
@@ -51,10 +52,12 @@ fn check_tweaked_sign_with_dkg() {
             b"message",
             SigningParameters {
                 tapscript_merkle_root: Some(vec![]),
+                bip32_key_path: Some(vec![0, 0]),
             },
         ),
     );
 }
+
 #[test]
 fn check_tweaked_sign_with_dealer() {
     let rng = thread_rng();
@@ -65,6 +68,7 @@ fn check_tweaked_sign_with_dealer() {
             b"message",
             SigningParameters {
                 tapscript_merkle_root: Some(vec![]),
+                bip32_key_path: Some(vec![0, 0]),
             },
         ),
     );
@@ -83,6 +87,7 @@ fn check_tweaked_sign_with_dealer_and_identifiers() {
             b"message",
             SigningParameters {
                 tapscript_merkle_root: Some(vec![]),
+                bip32_key_path: Some(vec![0, 0]),
             },
         ),
     );
