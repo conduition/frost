@@ -223,10 +223,18 @@ impl TweakedKeyInfo {
                 verifying_key.to_element().to_affine(),
             ),
             Some(key_path) => {
-                let xpub = bip32::ExtendedPubkey::new(verifying_key)
-                    .derive(key_path.as_slice())
-                    .expect("TODO");
-                (xpub.tweak_acc, xpub.public_key.to_affine())
+                let master_xpub = bip32::ExtendedPubkey::new(verifying_key);
+                let child_xpub = match master_xpub.derive(key_path.as_ref()) {
+                    Ok(xpub) => xpub,
+                    Err(bip32::DeriveError::InvalidChildKey) => {
+                        panic!("probability of BIP32 key derivation failing is negligible");
+                    }
+                    Err(bip32::DeriveError::MaxDepthExceeded) => {
+                        unreachable!("depth limit is enforced through type system, via MAX_SIZE parameter on KeyPath");
+                    }
+                };
+
+                (child_xpub.tweak_acc, child_xpub.public_key.to_affine())
             }
         };
         let bip32_key_is_odd: bool = child_pubkey.y_is_odd().into();
@@ -294,15 +302,17 @@ pub struct SigningParameters {
     pub tapscript_merkle_root: Option<Vec<u8>>,
 
     /// The [BIP32](https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki) key path
-    /// the group should use to sign the target message.
+    /// the group should use to sign the target message. It has a maximum length of 252
+    /// to ensure BIP32 depth limits cannot be exceeded, since the verifying key xpub derived
+    /// with BIP32 will have a depth of 3.
     ///
     /// To sign with a given BIP32 child key derived from the master verifying key, set
-    /// this to `Some(vec![...])`. For example, `Some(vec![0, 0])` would cause participants
-    /// to sign using an address derived at a BIP32 key path `<vk>/0/0`. The precise
-    /// derivation logic is described in the [`bip32`] module.
+    /// this to `Some(...)`. For example, `Some(bip32::key_path!(vk/0/0))` would cause
+    /// participants to sign using an address derived at a BIP32 key path `<vk>/0/0`.
+    /// The precise derivation logic is described in the [`bip32`] module.
     ///
     /// To sign without any BIP32 child derivation, leave this as `None`.
-    pub bip32_key_path: Option<Vec<u32>>,
+    pub bip32_key_path: Option<bip32::KeyPath<252>>,
 }
 
 impl frost_core::SigningParameters for SigningParameters {}
