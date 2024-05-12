@@ -24,7 +24,7 @@
 
 use super::{hasher_to_scalar, tagged_hash, Secp256K1Group, Secp256K1ScalarField, VerifyingKey};
 
-use frost_core::{Field, Group};
+use frost_core::{Field, Group, GroupError};
 use hmac::{Hmac, Mac};
 use k256::{ProjectivePoint, Scalar};
 use ripemd::Ripemd160;
@@ -212,7 +212,7 @@ macro_rules! key_path {
 
 /// Represents a [BIP32](https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki) extended
 /// public key derived from a FROST group verifying key.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct ExtendedPubkey {
     /// The 4-byte network version number used to produce a specific base58check-encoded prefix.
     pub network_version: [u8; 4],
@@ -230,6 +230,20 @@ pub struct ExtendedPubkey {
     pub(crate) tweak_acc: Scalar,
 }
 
+impl PartialEq for ExtendedPubkey {
+    /// This ignores the hidden `tweak_acc` field for the sake of a sensible public API, so
+    /// that serializing and deserializing produces an equal ExtendedPubkey.
+    fn eq(&self, other: &ExtendedPubkey) -> bool {
+        self.network_version == other.network_version
+            && self.public_key == other.public_key
+            && self.chain_code == other.chain_code
+            && self.depth == other.depth
+            && self.child_number == other.child_number
+            && self.parent_fingerprint == other.parent_fingerprint
+    }
+}
+impl Eq for ExtendedPubkey {}
+
 /// Possible errors which can occur during BIP32 key derivation.
 #[derive(thiserror::Error, Debug, Clone, Copy, Eq, PartialEq)]
 pub enum DeriveError {
@@ -239,6 +253,20 @@ pub enum DeriveError {
     /// We tried to derive a child key beyond a depth which can be represented as u8.
     #[error("child key would exceed maximum depth of 0xFF")]
     MaxDepthExceeded,
+}
+
+/// Possible errors which can occur during [`ExtendedPubkey`] deserialization.
+#[derive(thiserror::Error, Debug, Clone, Copy, Eq, PartialEq)]
+pub enum DecodeError {
+    /// Base58 decoding an xpub failed.
+    #[error("error decoding base58 extended key: {0}")]
+    Base58Decoding(#[from] bs58::decode::Error),
+    /// Decoding a base58 key which encodes the wrong length of payload.
+    #[error("invalid serialized extended key length {0}")]
+    InvalidLength(usize),
+    /// The public key embedded in the extended pubkey was not a valid curve point.
+    #[error("extended key contains invalid public key point")]
+    InvalidPublicKey(#[from] GroupError),
 }
 
 impl ExtendedPubkey {
@@ -322,6 +350,28 @@ impl ExtendedPubkey {
         Ok(xpub)
     }
 
+    /// Deserialize an extended pubkey from a fixed-length byte array. Returns an error
+    /// if the point encoded in the xpub is not on the curve.
+    pub fn from_bytes(buf: [u8; 78]) -> Result<Self, GroupError> {
+        let network_version = <[u8; 4]>::try_from(&buf[0..4]).unwrap();
+        let depth = buf[4];
+        let parent_fingerprint = <[u8; 4]>::try_from(&buf[5..9]).unwrap();
+        let child_number = u32::from_be_bytes(<[u8; 4]>::try_from(&buf[9..13]).unwrap());
+        let chain_code = <[u8; 32]>::try_from(&buf[13..45]).unwrap();
+        let public_key = Secp256K1Group::deserialize(&<[u8; 33]>::try_from(&buf[45..78]).unwrap())?;
+
+        let xpub = ExtendedPubkey {
+            network_version,
+            depth,
+            parent_fingerprint,
+            child_number,
+            chain_code,
+            public_key,
+            tweak_acc: Secp256K1ScalarField::zero(),
+        };
+        Ok(xpub)
+    }
+
     /// Serialize the xpub into a fixed-length byte array. The `network_version` determines the prefix
     /// of the xpub once it is encoded as base58.
     pub fn to_bytes(&self) -> [u8; 78] {
@@ -329,7 +379,7 @@ impl ExtendedPubkey {
         buf[0..4].copy_from_slice(&self.network_version);
         buf[4] = self.depth;
         buf[5..9].copy_from_slice(&self.parent_fingerprint);
-        buf[9..13].copy_from_slice(&u32::from(self.child_number).to_be_bytes());
+        buf[9..13].copy_from_slice(&self.child_number.to_be_bytes());
         buf[13..45].copy_from_slice(&self.chain_code[..]);
         buf[45..78].copy_from_slice(&Secp256K1Group::serialize(&self.public_key));
         buf
@@ -340,31 +390,85 @@ impl ExtendedPubkey {
     /// serialized xpub.
     ///
     /// ```
-    /// use frost_secp256k1_tr::{bip32, VerifyingKey};
+    /// use frost_secp256k1_tr::{bip32::{NETWORK_VERSION_XPUB, ExtendedPubkey}, VerifyingKey};
     /// use hex::FromHex;
     ///
     /// let vk = VerifyingKey::from_hex("0265a0578d696c6f475468458700a273d99c39edb0819d3fe3327aa8251d3df2e4").unwrap();
-    /// let xpub = bip32::ExtendedPubkey::new(&vk, bip32::NETWORK_VERSION_XPUB);
+    /// let xpub = ExtendedPubkey::new(&vk, NETWORK_VERSION_XPUB);
     /// assert_eq!(
     ///     xpub.to_base58(),
     ///     "xpub6DTAAS87qxjh5VzAEr1SdXssEpPBxxKXvGEpTvRxxd9KJMmrsEzqwWs87AHHrnrawQa9GC1xPt3jVHbbHGm9R2m5XpJwT2Red3gYyEA6yVR",
     /// );
+    /// assert_eq!(ExtendedPubkey::from_base58(&xpub.to_base58()), Ok(xpub));
     /// ```
     pub fn to_base58(&self) -> String {
         bs58::encode(self.to_bytes()).with_check().into_string()
+    }
+
+    /// Deserialize an xpub encoded in base58check format.
+    ///
+    /// ```
+    /// use frost_secp256k1_tr::bip32::ExtendedPubkey;
+    /// let xpub_str = "xpub6DTAAS87qxjh5VzAEr1SdXssEpPBxxKXvGEpTvRxxd9KJMmrsEzqwWs87AHHrnrawQa9GC1xPt3jVHbbHGm9R2m5XpJwT2Red3gYyEA6yVR";
+    /// let xpub = ExtendedPubkey::from_base58(xpub_str).unwrap();
+    /// ```
+    pub fn from_base58(xpub: &str) -> Result<Self, DecodeError> {
+        let vec = bs58::decode(xpub.as_bytes()).with_check(None).into_vec()?;
+        if vec.len() != 78 {
+            return Err(DecodeError::InvalidLength(vec.len()));
+        }
+        let bytes = <[u8; 78]>::try_from(vec).unwrap();
+        Ok(ExtendedPubkey::from_bytes(bytes)?)
     }
 }
 
 #[cfg(feature = "serde")]
 impl Serialize for ExtendedPubkey {
-    /// Serializes the ExtendedPubkey as its base58check-encoded serialization if the data
+    /// Serializes the ExtendedPubkey as a base58check-encoded string if the data
     /// format is human-readable, or as a byte array otherwise.
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         if serializer.is_human_readable() {
             self.to_base58().serialize(serializer)
         } else {
-            self.to_bytes().serialize(serializer)
+            self.to_bytes().as_slice().serialize(serializer)
         }
+    }
+}
+
+impl<'de> Deserialize<'de> for ExtendedPubkey {
+    /// Deserializes the ExtendedPubkey from a base58check-encoded string if the data
+    /// format is human-readable, or from a byte array otherwise.
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let invalid_pubkey_error = D::Error::invalid_value(
+            serde::de::Unexpected::Other("invalid public key in xpub"),
+            &"valid public key",
+        );
+
+        if deserializer.is_human_readable() {
+            let s = <&str>::deserialize(deserializer)?;
+            ExtendedPubkey::from_base58(s).map_err(|e| match e {
+                DecodeError::InvalidLength(len) => {
+                    D::Error::invalid_length(len, &"78-byte encoded xpub")
+                }
+                DecodeError::Base58Decoding(_) => D::Error::invalid_value(
+                    serde::de::Unexpected::Str(s),
+                    &"base58check encoded xpub",
+                ),
+                DecodeError::InvalidPublicKey(_) => invalid_pubkey_error,
+            })
+        } else {
+            let slice = <&[u8]>::deserialize(deserializer)?;
+            let array = <[u8; 78]>::try_from(slice)
+                .map_err(|_| D::Error::invalid_length(slice.len(), &"78-byte extended pubkey"))?;
+            ExtendedPubkey::from_bytes(array).map_err(|_| invalid_pubkey_error)
+        }
+    }
+}
+
+impl std::str::FromStr for ExtendedPubkey {
+    type Err = DecodeError;
+    fn from_str(xpub: &str) -> Result<Self, Self::Err> {
+        ExtendedPubkey::from_base58(xpub)
     }
 }
 
