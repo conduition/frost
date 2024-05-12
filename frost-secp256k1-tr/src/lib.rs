@@ -223,7 +223,9 @@ impl TweakedKeyInfo {
                 verifying_key.to_element().to_affine(),
             ),
             Some(key_path) => {
-                let master_xpub = bip32::ExtendedPubkey::new(verifying_key);
+                let master_xpub =
+                    bip32::ExtendedPubkey::new(verifying_key, bip32::NETWORK_VERSION_XPUB);
+
                 let child_xpub = match master_xpub.derive(key_path.as_ref()) {
                     Ok(xpub) => xpub,
                     Err(bip32::DeriveError::InvalidChildKey) => {

@@ -35,6 +35,11 @@ use sha2::{Digest, Sha256, Sha512};
 /// secret key is known.
 pub const HARDENED_OFFSET: u32 = 0x80000000;
 
+/// The mainnet `xpub...` prefix.
+pub const NETWORK_VERSION_XPUB: [u8; 4] = [0x04, 0x88, 0xB2, 0x1E];
+/// The testnet `tpub...` prefix.
+pub const NETWORK_VERSION_TPUB: [u8; 4] = [0x04, 0x35, 0x87, 0xCF];
+
 /// Possible errors which can occur during BIP32 [`KeyPath`] or [`ChildIndex`] construction.
 #[derive(thiserror::Error, Debug, Clone, Copy, Eq, PartialEq)]
 pub enum KeyPathError {
@@ -209,6 +214,8 @@ macro_rules! key_path {
 /// public key derived from a FROST group verifying key.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExtendedPubkey {
+    /// The 4-byte network version number used to produce a specific base58check-encoded prefix.
+    pub network_version: [u8; 4],
     /// The elliptic curve point used for payment and ownership proof.
     pub public_key: ProjectivePoint,
     /// The BIP32 chain code (additional entropy).
@@ -236,7 +243,7 @@ pub enum DeriveError {
 
 impl ExtendedPubkey {
     /// Construct a BIP32 extended public key by hashing the group's master verifying key.
-    pub fn new(group_master_pubkey: &VerifyingKey) -> ExtendedPubkey {
+    pub fn new(group_master_pubkey: &VerifyingKey, network_version: [u8; 4]) -> ExtendedPubkey {
         let vk = group_master_pubkey.to_element();
         let master_key_seralized = Secp256K1Group::serialize(&vk);
 
@@ -255,6 +262,7 @@ impl ExtendedPubkey {
 
         // Emulate a m/86'/0'/0' xpub
         ExtendedPubkey {
+            network_version,
             chain_code,
             public_key,
             depth: 3,
@@ -290,6 +298,7 @@ impl ExtendedPubkey {
             .map_err(|_| DeriveError::InvalidChildKey)?;
 
         let xpub = ExtendedPubkey {
+            network_version: self.network_version,
             chain_code: right_array,
             public_key: self.public_key + ProjectivePoint::GENERATOR * t,
             depth: self.depth + 1,
@@ -311,6 +320,57 @@ impl ExtendedPubkey {
             xpub = xpub.child(index)?;
         }
         Ok(xpub)
+    }
+
+    /// Serialize the xpub into a fixed-length byte array. The `network_version` determines the prefix
+    /// of the xpub once it is encoded as base58.
+    pub fn to_bytes(&self) -> [u8; 78] {
+        let mut buf = [0u8; 78];
+        buf[0..4].copy_from_slice(&self.network_version);
+        buf[4] = self.depth;
+        buf[5..9].copy_from_slice(&self.parent_fingerprint);
+        buf[9..13].copy_from_slice(&u32::from(self.child_number).to_be_bytes());
+        buf[13..45].copy_from_slice(&self.chain_code[..]);
+        buf[45..78].copy_from_slice(&Secp256K1Group::serialize(&self.public_key));
+        buf
+    }
+
+    /// Serialize the xpub into a fixed-length byte array and then base58-check encode it for
+    /// easy distribution to BIP32 clients. The `network_version` determines the prefix of the
+    /// serialized xpub.
+    ///
+    /// ```
+    /// use frost_secp256k1_tr::{bip32, VerifyingKey};
+    /// use hex::FromHex;
+    ///
+    /// let vk = VerifyingKey::from_hex("0265a0578d696c6f475468458700a273d99c39edb0819d3fe3327aa8251d3df2e4").unwrap();
+    /// let xpub = bip32::ExtendedPubkey::new(&vk, bip32::NETWORK_VERSION_XPUB);
+    /// assert_eq!(
+    ///     xpub.to_base58(),
+    ///     "xpub6DTAAS87qxjh5VzAEr1SdXssEpPBxxKXvGEpTvRxxd9KJMmrsEzqwWs87AHHrnrawQa9GC1xPt3jVHbbHGm9R2m5XpJwT2Red3gYyEA6yVR",
+    /// );
+    /// ```
+    pub fn to_base58(&self) -> String {
+        bs58::encode(self.to_bytes()).with_check().into_string()
+    }
+}
+
+#[cfg(feature = "serde")]
+impl Serialize for ExtendedPubkey {
+    /// Serializes the ExtendedPubkey as its base58check-encoded serialization if the data
+    /// format is human-readable, or as a byte array otherwise.
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        if serializer.is_human_readable() {
+            self.to_base58().serialize(serializer)
+        } else {
+            self.to_bytes().serialize(serializer)
+        }
+    }
+}
+
+impl std::fmt::Display for ExtendedPubkey {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        self.to_base58().fmt(f)
     }
 }
 
