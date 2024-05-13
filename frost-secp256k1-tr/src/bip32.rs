@@ -483,3 +483,73 @@ fn key_fingerprint(pubkey: ProjectivePoint) -> [u8; 4] {
     let digest = Ripemd160::digest(Sha256::digest(Secp256K1Group::serialize(&pubkey)));
     <[u8; 4]>::try_from(&digest[..4]).expect("always correct size")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki#test-vector-1
+    #[test]
+    fn test_vector_1() {
+        const TEST_VECTOR_1_XPUB: &str = "xpub68Gmy5EdvgibQVfPdqkBBCHxA5htiqg55crXYuXoQRKfDBFA1WEj\
+                                          WgP6LHhwBZeNK1VTsfTFUHCdrfp1bgwQ9xv5ski8PX9rL2dZXvgGDnw";
+        let parent_xpub: ExtendedPubkey = TEST_VECTOR_1_XPUB.parse().unwrap();
+        let child_xpub = parent_xpub
+            .child(ChildIndex::from(1))
+            .expect("error deriving child");
+
+        assert_eq!(
+            child_xpub.to_base58(),
+            "xpub6ASuArnXKPbfEwhqN6e3mwBcDTgzisQN1wXN9BJcM47sSikHjJf3\
+             UFHKkNAWbWMiGj7Wf5uMash7SyYq527Hqck2AxYysAA7xmALppuCkwQ"
+        );
+    }
+
+    /// https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki#test-vector-2
+    #[test]
+    fn test_vector_2() {
+        const TEST_VECTOR_2_XPUB: &str = "xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmR\
+                                          UapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB";
+        let parent_xpub: ExtendedPubkey = TEST_VECTOR_2_XPUB.parse().unwrap();
+        let child_xpub = parent_xpub
+            .child(ChildIndex::from(0))
+            .expect("error deriving child");
+
+        assert_eq!(
+            child_xpub.to_base58(),
+            "xpub69H7F5d8KSRgmmdJg2KhpAK8SR3DjMwAdkxj3ZuxV27CprR9Lgp\
+             eyGmXUbC6wb7ERfvrnKZjXoUmmDznezpbZb7ap6r1D3tgFxHmwMkQTPH"
+        );
+    }
+
+    const EXAMPLE_XPUB: &str = "xpub68Gmy5EdvgibQVfPdqkBBCHxA5htiqg55crXYuXoQRKfDBFA1WEj\
+                                WgP6LHhwBZeNK1VTsfTFUHCdrfp1bgwQ9xv5ski8PX9rL2dZXvgGDnw";
+    #[test]
+    fn serialization() {
+        let xpub: ExtendedPubkey = EXAMPLE_XPUB.parse().unwrap();
+
+        let xpub_json = serde_json::to_string(&xpub).unwrap();
+        let xpub_binary = postcard::to_stdvec(&xpub).unwrap();
+
+        assert_eq!(xpub_json, format!("\"{EXAMPLE_XPUB}\""));
+        assert_eq!(
+            xpub_binary,
+            hex::decode(
+                "4e0488b21e013442193e8000000047fdacbd0f1097043b78c63c20c34ef4ed9a111d980047ad1628\
+                 2c7ae6236141035a784662a4a20a65bf6aab9ae98a6c068a81c52e4b032c0fb5400c706cfccc56"
+            )
+            .unwrap()
+        );
+
+        assert_eq!(
+            serde_json::from_str::<ExtendedPubkey>(&xpub_json)
+                .expect("error decoding xpub from JSON"),
+            xpub,
+        );
+        assert_eq!(
+            postcard::from_bytes::<ExtendedPubkey>(&xpub_binary)
+                .expect("error decoding xpub from postcard"),
+            xpub,
+        );
+    }
+}
