@@ -205,7 +205,11 @@ impl<'de, const MAX_SIZE: usize> Deserialize<'de> for KeyPath<MAX_SIZE> {
 #[macro_export]
 macro_rules! key_path {
     (vk/$j:literal$(/$i:literal)*) => {
-        frost_secp256k1_tr::bip32::KeyPath::try_from([$j$(, $i)*].as_ref())
+        $crate::bip32::KeyPath::try_from([$j$(, $i)*].as_ref())
+            .expect("invalid elements in key_path macro")
+    };
+    (vk/$j:literal$(/$i:literal)*, $max:expr) => {
+        $crate::bip32::KeyPath::<$max>::try_from([$j$(, $i)*].as_ref())
             .expect("invalid elements in key_path macro")
     };
 }
@@ -524,6 +528,29 @@ mod tests {
             child_xpub.to_base58(),
             "xpub69H7F5d8KSRgmmdJg2KhpAK8SR3DjMwAdkxj3ZuxV27CprR9Lgp\
              eyGmXUbC6wb7ERfvrnKZjXoUmmDznezpbZb7ap6r1D3tgFxHmwMkQTPH"
+        );
+    }
+
+    #[test]
+    fn custom_test_case() {
+        // Mnemonic:
+        //   nurse acid bitter rhythm toddler town online obtain tag suggest response fiber
+        //
+        // Derivation path:
+        //   m/44'/0'/0'
+        const CUSTOM_XPUB: &str = "xpub6CA14wAZpPrVydEBYhL6k8Npoh72xr3cUSfyECRAjLxmgYvi4sqJ\
+                                   Vnh1xS5TRtD13cpMkyrSLoTksjTogs5qNP4YVz4EiygkudY3maENJrX";
+
+        let parent_xpub: ExtendedPubkey = CUSTOM_XPUB.parse().unwrap();
+        let child_xpub = parent_xpub
+            .derive(key_path!(vk / 5 / 1, 2).as_ref())
+            .expect("error deriving child");
+
+        // m/44'/0'/0'/5/1
+        assert_eq!(
+            child_xpub.to_base58(),
+            "xpub6GiQCiKbGJ4GdQKqA821qGvmFSZHRn2JPBxX8pdhQEweyui5sa\
+             BtDAcqU9cMC2NjeE5jQYhDSqU78MtqUedte8niFeap8djso6k3E6cko2T",
         );
     }
 
