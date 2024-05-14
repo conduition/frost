@@ -393,11 +393,15 @@ impl ExtendedPubkey {
     /// use frost_secp256k1_tr::{bip32::{NETWORK_VERSION_XPUB, ExtendedPubkey}, VerifyingKey};
     /// use hex::FromHex;
     ///
-    /// let vk = VerifyingKey::from_hex("0265a0578d696c6f475468458700a273d99c39edb0819d3fe3327aa8251d3df2e4").unwrap();
+    /// let vk = VerifyingKey::from_hex(
+    ///     "0265a0578d696c6f475468458700a273d99c39edb0819d3fe3327aa8251d3df2e4"
+    /// ).unwrap();
+    ///
     /// let xpub = ExtendedPubkey::new(&vk, NETWORK_VERSION_XPUB);
     /// assert_eq!(
     ///     xpub.to_base58(),
-    ///     "xpub6DTAAS87qxjh5VzAEr1SdXssEpPBxxKXvGEpTvRxxd9KJMmrsEzqwWs87AHHrnrawQa9GC1xPt3jVHbbHGm9R2m5XpJwT2Red3gYyEA6yVR",
+    ///     "xpub6DTAAS87qxjh5VzAEr1SdXssEpPBxxKXvGEpTvRxxd9KJMmrsE\
+    ///      zqwWs87AHHrnrawQa9GC1xPt3jVHbbHGm9R2m5XpJwT2Red3gYyEA6yVR",
     /// );
     /// assert_eq!(ExtendedPubkey::from_base58(&xpub.to_base58()), Ok(xpub));
     /// ```
@@ -409,7 +413,8 @@ impl ExtendedPubkey {
     ///
     /// ```
     /// use frost_secp256k1_tr::bip32::ExtendedPubkey;
-    /// let xpub_str = "xpub6DTAAS87qxjh5VzAEr1SdXssEpPBxxKXvGEpTvRxxd9KJMmrsEzqwWs87AHHrnrawQa9GC1xPt3jVHbbHGm9R2m5XpJwT2Red3gYyEA6yVR";
+    /// let xpub_str = "xpub6DTAAS87qxjh5VzAEr1SdXssEpPBxxKXvGEpTvRxxd9KJMmrsE\
+    ///                 zqwWs87AHHrnrawQa9GC1xPt3jVHbbHGm9R2m5XpJwT2Red3gYyEA6yVR";
     /// let xpub = ExtendedPubkey::from_base58(xpub_str).unwrap();
     /// ```
     pub fn from_base58(xpub: &str) -> Result<Self, DecodeError> {
